@@ -96,6 +96,19 @@ app.get("/api/dbcheck", (req, res) => {
     res.json({ connectedTo: rows?.[0]?.db || null });
   });
 });
+// Global error handler (temporary for debugging)
+app.use((err, req, res, _next) => {
+  console.error("UNCAUGHT", err);
+  const payload = {
+    error: err?.code || "INTERNAL",
+    message: err?.message || String(err),
+  };
+  // In dev/preview you can include stack; in prod you can omit
+  if (process.env.VERCEL_ENV !== "production" && err?.stack) {
+    payload.stack = err.stack.split("\n").slice(0, 3);
+  }
+  res.status(500).json(payload);
+});
 
 // ---------- Helpers ----------
 function onlyDigits(s) {
