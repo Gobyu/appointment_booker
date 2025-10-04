@@ -1,32 +1,26 @@
-// api/index.js
 // Express on Vercel (serverless) with MySQL pooling + MySQL session store
 
 const express = require("express");
-const mysql = require("mysql2");
+const mysql = require("mysql2"); // <-- keep ONLY this one
 const cors = require("cors");
 const session = require("express-session");
-const MySQLStore = require("express-mysql-session")(require("express-session"));
+const MySQLStore = require("express-mysql-session")(session);
 const bcrypt = require("bcryptjs");
 const serverless = require("serverless-http");
 
 // ---------- Config (all secrets in env) ----------
 const {
   DB_HOST,
+  DB_PORT,
   DB_USER,
   DB_PASSWORD,
   DB_NAME,
   SESSION_SECRET = "change-me-in-env",
   NODE_ENV,
-  CORS_ORIGIN, // optional: your Vercel URL (e.g., https://your-app.vercel.app)
+  CORS_ORIGIN, // optional
 } = process.env;
 
-// Create a single MySQL pool per serverless container (module scope = reused across invocations)
 // ---- DB POOL (SSL-friendly for Aiven) ----
-const mysql = require("mysql2");
-
-// Build an SSL config:
-// - If you add DB_CA_CERT in Vercel (paste the CA PEM), we'll use it.
-// - Otherwise we'll still require TLS and verify certs.
 const ssl =
   process.env.DB_CA_CERT && process.env.DB_CA_CERT.trim()
     ? { ca: process.env.DB_CA_CERT }
@@ -35,11 +29,11 @@ const ssl =
 const pool =
   global.__MYSQL_POOL__ ||
   mysql.createPool({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    host: DB_HOST,
+    port: DB_PORT ? Number(DB_PORT) : 3306,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    database: DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -47,13 +41,19 @@ const pool =
     keepAliveInitialDelay: 0,
     ssl,
   });
-
 if (!global.__MYSQL_POOL__) global.__MYSQL_POOL__ = pool;
 
 // Session store uses same pool
-
 const sessionStore = global.__SESSION_STORE__ || new MySQLStore({}, pool);
 if (!global.__SESSION_STORE__) global.__SESSION_STORE__ = sessionStore;
+
+// optional warmup
+function pingOnce() {
+  if (global.__PINGED__) return;
+  pool.query("SELECT 1", () => {});
+  global.__PINGED__ = true;
+}
+pingOnce();
 
 // A tiny helper that runs a ping once per container spin-up (optional)
 function pingOnce() {
@@ -65,19 +65,18 @@ pingOnce();
 
 // ---------- App ----------
 const app = express();
-
-// Vercel runs behind a proxy; needed for secure cookies
 app.set("trust proxy", 1);
 
-// If your frontend is the SAME Vercel domain, you can comment CORS out.
-// If you need cross-origin (e.g., local dev), set CORS_ORIGIN env and keep this:
+// SAFE permissive CORS for specified origin(s)
 const allowedOrigins = [CORS_ORIGIN, "http://localhost:5173"].filter(Boolean);
 app.use(
   cors({
-    origin: function (origin, cb) {
-      // allow same-origin or no-origin requests (curl/postman)
-      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error("Not allowed by CORS"));
+    origin: (origin, cb) => {
+      // allow same-origin or no-origin (SSR/curl) without error
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      // instead of error -> deny CORS silently (no headers) to avoid 500
+      return cb(null, false);
     },
     credentials: true,
   })
