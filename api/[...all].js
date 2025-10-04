@@ -47,14 +47,6 @@ if (!global.__MYSQL_POOL__) global.__MYSQL_POOL__ = pool;
 const sessionStore = global.__SESSION_STORE__ || new MySQLStore({}, pool);
 if (!global.__SESSION_STORE__) global.__SESSION_STORE__ = sessionStore;
 
-// optional warmup
-function pingOnce() {
-  if (global.__PINGED__) return;
-  pool.query("SELECT 1", () => {});
-  global.__PINGED__ = true;
-}
-pingOnce();
-
 // A tiny helper that runs a ping once per container spin-up (optional)
 function pingOnce() {
   if (global.__PINGED__) return;
@@ -98,6 +90,12 @@ app.use(
     },
   })
 );
+app.get("/api/dbcheck", (req, res) => {
+  pool.query("SELECT DATABASE() AS db", (err, rows) => {
+    if (err) return res.status(500).json({ error: err.code || String(err), detail: err.message });
+    res.json({ connectedTo: rows?.[0]?.db || null });
+  });
+});
 
 // ---------- Helpers ----------
 function onlyDigits(s) {
