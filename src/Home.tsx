@@ -1,4 +1,3 @@
-import React from "react";
 import massage1 from "./assets/massage1.png";
 
 const Home = () => {
