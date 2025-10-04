@@ -5,7 +5,7 @@ const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
 const session = require("express-session");
-const MySQLStore = require("express-mysql-session")(session);
+const MySQLStore = require("express-mysql-session")(require("express-session"));
 const bcrypt = require("bcryptjs");
 const serverless = require("serverless-http");
 
@@ -21,23 +21,37 @@ const {
 } = process.env;
 
 // Create a single MySQL pool per serverless container (module scope = reused across invocations)
+// ---- DB POOL (SSL-friendly for Aiven) ----
+const mysql = require("mysql2");
+
+// Build an SSL config:
+// - If you add DB_CA_CERT in Vercel (paste the CA PEM), we'll use it.
+// - Otherwise we'll still require TLS and verify certs.
+const ssl =
+  process.env.DB_CA_CERT && process.env.DB_CA_CERT.trim()
+    ? { ca: process.env.DB_CA_CERT }
+    : { rejectUnauthorized: true };
+
 const pool =
   global.__MYSQL_POOL__ ||
   mysql.createPool({
-    host: DB_HOST,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    database: DB_NAME,
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    // IMPORTANT: keepAlive helps with serverless connection reuse
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
+    ssl,
   });
+
 if (!global.__MYSQL_POOL__) global.__MYSQL_POOL__ = pool;
 
-// Session store uses the same pool
+// Session store uses same pool
+
 const sessionStore = global.__SESSION_STORE__ || new MySQLStore({}, pool);
 if (!global.__SESSION_STORE__) global.__SESSION_STORE__ = sessionStore;
 
@@ -521,11 +535,9 @@ app.put(
 
     if (isOpen) {
       if (!start || !end)
-        return res
-          .status(400)
-          .json({
-            error: "When is_open is true, start_time and end_time are required",
-          });
+        return res.status(400).json({
+          error: "When is_open is true, start_time and end_time are required",
+        });
       if (start >= end)
         return res
           .status(400)
@@ -641,11 +653,9 @@ app.post(
 
     if (open) {
       if (!st || !et)
-        return res
-          .status(400)
-          .json({
-            error: "start_time and end_time required when is_open=true",
-          });
+        return res.status(400).json({
+          error: "start_time and end_time required when is_open=true",
+        });
       if (st >= et)
         return res
           .status(400)
@@ -715,11 +725,9 @@ app.put(
 
     if (open) {
       if (!st || !et)
-        return res
-          .status(400)
-          .json({
-            error: "start_time and end_time required when is_open=true",
-          });
+        return res.status(400).json({
+          error: "start_time and end_time required when is_open=true",
+        });
       if (st >= et)
         return res
           .status(400)
